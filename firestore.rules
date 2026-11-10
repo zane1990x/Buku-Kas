@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function owner(uid) {
+      return request.auth != null && request.auth.uid == uid
+        && request.auth.token.firebase.sign_in_provider == 'password';
+    }
+    function amount(n) { return n is int && n >= 0 && n <= 999999999999; }
+    function project() {
+      let p = request.resource.data;
+      return p.name is string && p.name.size() > 0 && p.name.size() <= 90
+        && amount(p.budget) && p.logo is string && p.logo.size() <= 150000;
+    }
+    function item() {
+      let i = request.resource.data;
+      return i.kind in ['income', 'materials', 'expense', 'invoice', 'task']
+        && i.title is string && i.title.size() > 0 && i.title.size() <= 120
+        && i.date is string && i.date.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+        && (i.kind == 'task' || (amount(i.amount) && i.amount > 0))
+        && (i.kind != 'invoice' || (i.payments is list && i.payments.size() <= 150
+          && amount(i.paid) && i.paid <= i.amount));
+    }
+    match /users/{uid}/projects/{pid} {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid) && project();
+      match /items/{id} {
+        allow read, delete: if owner(uid);
+        allow create, update: if owner(uid) && item();
+      }
+      match /media/{id} {
+        allow get, delete: if owner(uid);
+        allow create, update: if owner(uid) && request.resource.data.keys().hasOnly(['image'])
+          && request.resource.data.image is string
+          && request.resource.data.image.size() <= 480000
+          && request.resource.data.image.matches('data:image/jpeg;base64,[A-Za-z0-9+/=]+');
+      }
+    }
+  }
+}
